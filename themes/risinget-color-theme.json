@@ -28,7 +28,7 @@
 		"textBlockQuote.background": "#2f3b54",
 		"textBlockQuote.border": "#2f3b54",
 		"textCodeBlock.background": "#171c28",
-		"textLink.activeForeground": "#ffcc66",
+		"textLink.activeForeground": "#ffaa00",
 		"textLink.foreground": "#ffcc66",
 		"textPreformat.foreground": "#d7dce2",
 		"textSeparator.foreground": "#d7dce2",
@@ -626,7 +626,7 @@
 				"keyword.control.filter"
 			],
 			"settings": {
-				"foreground": "#82AAFF"
+				"foreground": "#8381ff"
 			}
 		},
 		{
@@ -668,7 +668,7 @@
 				"storage.type.attr.nunjucks"
 			],
 			"settings": {
-				"foreground": "#C3E88D"
+				"foreground": "#95fd95"
 			}
 		},
 		{
