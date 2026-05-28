@@ -1,0 +1,21 @@
+{
+  "name": "risinget-theme",
+  "displayName": "risinget-theme",
+  "description": "Risinget Theme",
+  "version": "0.0.1",
+  "engines": {
+    "vscode": "^1.120.0"
+  },
+  "categories": [
+    "Themes"
+  ],
+  "contributes": {
+    "themes": [
+      {
+        "label": "Risinget Theme",
+        "uiTheme": "vs-dark",
+        "path": "./themes/risinget-color-theme.json"
+      }
+    ]
+  }
+}
