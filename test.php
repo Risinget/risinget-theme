@@ -21,370 +21,400 @@ use App\Services\Siat\FacturaXmlBuilder;
 use App\Services\Siat\CufGeneratorService;
 use App\Http\Requests\Impuesto\StoreFacturaEducativoRequest;
 
-class SiatFacturaEducativoController extends Controller
+declare(strict_types=1);
+
+namespace App\ThemeTest;
+
+use DateTimeImmutable;
+use DateTimeInterface;
+use Exception;
+use InvalidArgumentException;
+use JsonSerializable;
+use RuntimeException;
+use Throwable;
+
+/*
+|--------------------------------------------------------------------------
+| PHP Theme Test File
+|--------------------------------------------------------------------------
+| Archivo genérico para probar colores de sintaxis PHP en VSCode.
+| Incluye: namespace, use, class, enum, trait, interface, attributes,
+| strings, arrays, closures, match, try/catch, PHPDoc, heredoc, nowdoc,
+| regex, nullable types, union types, readonly, named arguments y más.
+|--------------------------------------------------------------------------
+*/
+
+#[Attribute(Attribute::TARGET_CLASS | Attribute::TARGET_METHOD)]
+class Route
 {
     public function __construct(
-        private readonly SiatService         $siat,
-        private readonly CufGeneratorService $cufGenerator,
-        private readonly FacturaXmlBuilder   $xmlBuilder,
+        public string $method,
+        public string $path,
+        public ?string $name = null,
+        public array $middleware = [],
+    ) {}
+}
+
+enum EstadoFactura: string
+{
+    case BORRADOR = 'borrador';
+    case EMITIDA = 'emitida';
+    case PAGADA = 'pagada';
+    case ANULADA = 'anulada';
+
+    public function label(): string
+    {
+        return match ($this) {
+            self::BORRADOR => 'Borrador',
+            self::EMITIDA  => 'Emitida',
+            self::PAGADA   => 'Pagada',
+            self::ANULADA  => 'Anulada',
+        };
+    }
+
+    public function color(): string
+    {
+        return match ($this) {
+            self::BORRADOR => '#64748b',
+            self::EMITIDA  => '#2563eb',
+            self::PAGADA   => '#16a34a',
+            self::ANULADA  => '#dc2626',
+        };
+    }
+}
+
+interface Exportable
+{
+    /**
+     * Exporta el objeto actual como arreglo asociativo.
+     *
+     * @return array<string, mixed>
+     */
+    public function toArray(): array;
+}
+
+interface RepositoryInterface
+{
+    public function find(int|string $id): ?FacturaDTO;
+
+    /**
+     * @return list<FacturaDTO>
+     */
+    public function all(): array;
+}
+
+trait HasLogger
+{
+    protected function log(string $message, array $context = []): void
+    {
+        $timestamp = (new DateTimeImmutable())->format(DateTimeInterface::ATOM);
+
+        echo "[{$timestamp}] {$message}" . PHP_EOL;
+
+        if ($context !== []) {
+            print_r($context);
+        }
+    }
+}
+
+readonly class ClienteDTO implements JsonSerializable
+{
+    public function __construct(
+        public int $id,
+        public string $nombre,
+        public string $documento,
+        public ?string $email = null,
     ) {}
 
-    // ─── CUIS / CUFD ────────────────────────────────────────────────
-
-    /**
-     * Obtiene el CUIS vigente o solicita uno nuevo si está próximo a expirar.
-     */
-    public function ultimoCuis(): ?string
+    public function jsonSerialize(): array
     {
-        $ultimoCuis = SiatCuis::latest('id')->first();
-        $nuevoCuis  = $ultimoCuis?->cuis;
-
-        // Si existe y su vigencia es mayor a 1 día, reutilizarlo
-        if ($ultimoCuis && now()->addDay()->lessThan($ultimoCuis->fechaVigencia)) {
-            return $nuevoCuis;
-        }
-
-        // Solicitar un nuevo CUIS a la API
-        try {
-            $res = $this->siat->codigos->cuis(
-                codigoAmbiente:   $this->siat->config->codigoAmbiente,
-                codigoModalidad:  $this->siat->config->codigoModalidad,
-                codigoPuntoVenta: $this->siat->config->codigoPuntoVenta,
-                codigoSistema:    $this->siat->config->codigoSistema,
-                codigoSucursal:   $this->siat->config->codigoSucursal,
-                nit:              $this->siat->config->nit,
-            );
-
-            if (isset($res['data']->RespuestaCuis->codigo)) {
-                $modelo = SiatCuis::create([
-                    'cuis'          => $res['data']->RespuestaCuis->codigo,
-                    'fechaVigencia' => date('Y-m-d H:i:s', strtotime($res['data']->RespuestaCuis->fechaVigencia)),
-                ]);
-
-                return $modelo->cuis;
-            }
-        } catch (\Throwable $e) {
-            Log::error('Error al solicitar CUIS al SIAT', [
-                'error'   => $e->getMessage(),
-                'trace'   => $e->getTraceAsString(),
-            ]);
-        }
-
-        // Fallback: usar el anterior si existe
-        return $nuevoCuis;
-    }
-
-    /**
-     * Obtiene el CUFD vigente o solicita uno nuevo si ya expiró.
-     */
-    public function ultimoCufd(): ?SiatCufd
-    {
-        $ultimoCufd    = SiatCufd::latest()->first();
-
-        $fechaVigencia = $ultimoCufd?->fechaVigencia
-        ? Carbon::parse($ultimoCufd->fechaVigencia)
-        : null;
-
-        // Si el CUFD existe y todavía es vigente, retornarlo directamente
-        if ($ultimoCufd && !is_null($fechaVigencia) && $fechaVigencia > now()) {
-            return $ultimoCufd;
-        }
-
-        // Si no existe o ya expiró, solicitar uno nuevo a la API
-        try {
-            $responseCufd = $this->siat->codigos->cufd(
-                codigoAmbiente:   $this->siat->config->codigoAmbiente,
-                codigoModalidad:  $this->siat->config->codigoModalidad,
-                codigoPuntoVenta: $this->siat->config->codigoPuntoVenta,
-                codigoSistema:    $this->siat->config->codigoSistema,
-                codigoSucursal:   $this->siat->config->codigoSucursal,
-                cuis:             $this->ultimoCuis(),
-                nit:              $this->siat->config->nit,
-            );
-
-            if ($responseCufd['data']->RespuestaCufd->codigo) {
-                return SiatCufd::create([
-                    'codigo'        => $responseCufd['data']->RespuestaCufd->codigo,
-                    'codigoControl' => $responseCufd['data']->RespuestaCufd->codigoControl,
-                    'direccion'     => $responseCufd['data']->RespuestaCufd->direccion,
-                    'fechaVigencia' => $responseCufd['data']->RespuestaCufd->fechaVigencia,
-                ]);
-            }
-        } catch (\Throwable $e) {
-            Log::error('Error al solicitar CUFD al SIAT', [
-                'error' => $e->getMessage(),
-                'trace' => $e->getTraceAsString(),
-            ]);
-        }
-
-        return null;
-    }
-
-    // ─── INDEX ───────────────────────────────────────────────────────
-
-    public function index()
-    {
-        $statusSiat = 'NO ACTIVO';
-
-        try {
-            $response   = $this->siat->codigos->verificarComunicacion();
-            $statusSiat = $response['data']->RespuestaComunicacion->mensajesList->descripcion ?? 'NO ACTIVO';
-        } catch (\Throwable $e) {
-            Log::warning('No se pudo verificar comunicación SIAT', ['error' => $e->getMessage()]);
-        }
-
-        $sucursales = Sucursal::all();
-        $productos  = SiatProducto::all();
-        $codigoCUIS = $this->ultimoCuis();
-        $cufdModel  = $this->ultimoCufd();
-        $codigoCUFD = $cufdModel?->codigoControl;
-        $nit        = (string) $this->siat->config->nit;
-
-        return view('main_1.impuesto.facturaeducativo.index', compact(
-            'sucursales',
-            'nit',
-            'productos',
-            'codigoCUIS',
-            'codigoCUFD',
-            'statusSiat',
-        ));
-    }
-
-    // ─── BUSCAR CLIENTE ─────────────────────────────────────────────
-
-    public function buscarCliente(Request $request): JsonResponse
-    {
-        $request->validate([
-            'NumeroDocumento'              => 'required|string',
-            'CodigoTipoDocumentoIdentidad' => 'required|string',
-        ]);
-
-        $cliente = SiatCliente::where('NumeroDocumento', $request->input('NumeroDocumento'))
-            ->where('CodigoTipoDocumentoIdentidad', $request->input('CodigoTipoDocumentoIdentidad'))
-            ->first();
-
-        return response()->json([
-            'success' => (bool) $cliente,
-            'data'    => $cliente,
-        ]);
-    }
-
-    // ─── STORE (Emisión de Factura) ─────────────────────────────────
-
-    public function store(StoreFacturaEducativoRequest $request): JsonResponse
-    {
-        // 1. Obtener leyenda aleatoria
-        $leyenda = $this->obtenerLeyendaAleatoria();
-        if ($leyenda === null) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No se pudo obtener la leyenda del SIAT. Recargue e intente de nuevo.',
-            ], 503);
-        }
-
-        // 2. Obtener CUFD vigente
-        $cufdModel = $this->ultimoCufd();
-        if (!$cufdModel) {
-            return response()->json([
-                'success' => false,
-                'message' => 'No se pudo obtener un CUFD vigente. Intente nuevamente.',
-            ], 503);
-        }
-
-        // 3. Datos del emisor
-        $sucursal          = Sucursal::find(1);
-        $sucursalDireccion = $sucursal?->direccion ?? '';
-        $usuarioActual     = Auth::user()->usuario;
-
-        // TODO: Implementar correlativo real de facturas (tabla/secuencia)
-        $numeroFacturaNormal = 2;
-
-        // 4. Generar CUF
-        $fecha    = Carbon::now();
-        $cufData  = $this->cufGenerator->generar(
-            nit:               $this->siat->config->nit,
-            fecha:             $fecha,
-            codigoSucursal:    $this->siat->config->codigoSucursal,
-            modalidad:         $this->siat->config->codigoModalidad,
-            tipoEmision:       SiatConstants::EMISION_ONLINE,
-            tipoFactura:       SiatConstants::FACTURA_CREDITO_FISCAL,
-            tipoDocSector:     SiatConstants::SECTOR_EDUCATIVO,
-            numeroFactura:     $numeroFacturaNormal,
-            puntoVenta:        $this->siat->config->codigoPuntoVenta,
-            codigoControlCufd: $cufdModel->codigoControl,
-        );
-
-        // 5. Construir XML
-        $factura = $this->xmlBuilder->build(
-            cabecera: [
-                'nitEmisor'                    => $this->siat->config->nit,
-                'razonSocialEmisor'            => config('siat.emisor.razonSocial'),
-                'municipio'                    => config('siat.emisor.municipio'),
-                'telefono'                     => config('siat.emisor.telefono'),
-                'numeroFactura'                => $numeroFacturaNormal,
-                'cuf'                          => $cufData['cuf'],
-                'cufd'                         => $cufdModel->codigo,
-                'codigoSucursal'               => $this->siat->config->codigoSucursal,
-                'direccion'                    => $sucursalDireccion,
-                'codigoPuntoVenta'             => $this->siat->config->codigoPuntoVenta,
-                'fechaEmision'                 => $cufData['fechaEnvio'],
-                'nombreRazonSocial'            => $request->razonSocial,
-                'codigoTipoDocumentoIdentidad' => $request->codigoTipoDocumentoIdentidad,
-                'numeroDocumento'              => $request->numeroDocumento,
-                'complemento'                  => $request->complemento,
-                'nombreEstudiante'             => $request->nombreEstudiante,
-                'periodoFacturado'             => $request->periodoFacturado,
-                'codigoMetodoPago'             => $request->codigoMetodoPago,
-                'montoTotal'                   => $request->montoTotal,
-                'montoTotalSujetoIva'          => $request->montoTotalSujetoIva,
-                'codigoMoneda'                 => SiatConstants::MONEDA_BOLIVIANO,
-                'tipoCambio'                   => SiatConstants::TIPO_CAMBIO_DEFAULT,
-                'codigoActividad'              => $request->codigoActividad,
-                'leyenda'                      => $leyenda->descripcionLeyenda ?? '',
-                'usuario'                      => $usuarioActual,
-                'codigoDocumentoSector'         => SiatConstants::SECTOR_EDUCATIVO,
-            ],
-            detalles: $request->detalles,
-        );
-
-        // 6. Comprimir y hashear
-        $nombreArchivo = 'siat_factura_' . now()->format('YmdHis') . '_' . uniqid() . '.xml';
-        $rutaRelativa  = 'siat/facturas/' . $nombreArchivo;
-        Storage::put($rutaRelativa, $factura);
-
-        $archivo     = gzencode($factura, 9);
-        $hashArchivo = hash('sha256', $archivo);
-        $cuis        = $this->ultimoCuis();
-
-        // 7. Enviar factura al SIAT
-        try {
-            $facturaResponse = $this->siat->facturaEducativo->recepcionFactura(
-                codigoAmbiente:        $this->siat->config->codigoAmbiente,
-                codigoDocumentoSector:  SiatConstants::SECTOR_EDUCATIVO,
-                codigoEmision:         SiatConstants::EMISION_ONLINE,
-                codigoModalidad:       $this->siat->config->codigoModalidad,
-                codigoPuntoVenta:      $this->siat->config->codigoPuntoVenta,
-                codigoSistema:         $this->siat->config->codigoSistema,
-                codigoSucursal:        $this->siat->config->codigoSucursal,
-                cufd:                  $cufdModel->codigo,
-                cuis:                  $cuis,
-                nit:                   $this->siat->config->nit,
-                tipoFacturaDocumento:  SiatConstants::FACTURA_CREDITO_FISCAL,
-                archivo:               $archivo,
-                fechaEnvio:            $cufData['fechaEnvio'],
-                hashArchivo:           $hashArchivo,
-            );
-        } catch (\Throwable $e) {
-            Log::error('Error al enviar factura al SIAT', [
-                'error' => $e->getMessage(),
-                'cuf'   => $cufData['cuf'],
-                'trace' => $e->getTraceAsString(),
-            ]);
-
-            return response()->json([
-                'success' => false,
-                'message' => 'Error al comunicarse con el SIAT. Intente nuevamente.',
-                'error'   => config('app.debug') ? $e->getMessage() : null,
-            ], 503);
-        }
-
-        // 8. Construir respuesta
-        $url = $this->buildQrUrl($cufData['cuf'], $numeroFacturaNormal, $facturaResponse);
-
-        $response = [
-            'success'    => true,
-            'message'    => 'Factura enviada al SIAT.',
-            'data'       => [
-                'cuf'           => $cufData['cuf'],
-                'nroFactura'    => $numeroFacturaNormal,
-                'url'           => $url,
-                'siatResponse'  => $facturaResponse,
-            ],
+        return [
+            'id'        => $this->id,
+            'nombre'    => $this->nombre,
+            'documento' => $this->documento,
+            'email'     => $this->email,
         ];
+    }
+}
 
-        // Incluir datos de debug solo en modo development
-        if (config('app.debug')) {
-            $response['debug'] = [
-                'xml'             => $factura,
-                'hash'            => $hashArchivo,
-                'archivoTemporal' => $rutaRelativa,
-                'cadenas'         => $cufData,
-            ];
-        }
+/**
+ * @template TKey of array-key
+ * @template TValue
+ */
+final class Collection
+{
+    /**
+     * @param array<TKey, TValue> $items
+     */
+    public function __construct(
+        private array $items = [],
+    ) {}
 
-        SiatFactura::create([
-            'codigo_documento_sector' => SiatConstants::SECTOR_EDUCATIVO,
-            'codigoDescripcion'       => $facturaResponse['data']->RespuestaServicioFacturacion->codigoDescripcion,
-            'codigoRecepcion'         => $facturaResponse['data']->RespuestaServicioFacturacion?->codigoRecepcion ?? 'NO CODIGO',
-            'cuf'                     => $cufData['cuf'],
-            'cufd'                    => $cufdModel->codigo,
-            'fecha_emision'           => $cufData['fechaEnvio'],
-            'nit_cliente'             => $request->numeroDocumento,
-            'razon_social_cliente'    => $request->razonSocial,
-            'monto_total'             => $request->montoTotal,
-            'documento_xml'           => $factura,
-            'url'                     => $url,
-        ]);
-
-        return response()->json($response);
+    public function map(callable $callback): self
+    {
+        return new self(array_map($callback, $this->items));
     }
 
-    // ─── Métodos privados auxiliares ─────────────────────────────────
-
-    /**
-     * Obtiene una leyenda aleatoria del SIAT para incluir en la factura.
-     */
-    private function obtenerLeyendaAleatoria(): ?object
+    public function filter(?callable $callback = null): self
     {
-        $cuis = $this->ultimoCuis();
+        return new self(array_filter($this->items, $callback));
+    }
 
-        if ($cuis === null) {
-            Log::warning('No hay CUIS disponible para obtener leyendas.');
-            return null;
-        }
+    public function first(): mixed
+    {
+        return $this->items[array_key_first($this->items)] ?? null;
+    }
 
-        try {
-            $leyendas = $this->siat->sincronizacion->sincronizarListaLeyendasFactura(
-                codigoAmbiente:   $this->siat->config->codigoAmbiente,
-                codigoPuntoVenta: $this->siat->config->codigoPuntoVenta,
-                codigoSistema:    $this->siat->config->codigoSistema,
-                codigoSucursal:   $this->siat->config->codigoSucursal,
-                cuis:             $cuis,
-                nit:              $this->siat->config->nit,
-            );
+    public function all(): array
+    {
+        return $this->items;
+    }
+}
 
-            $lista = $leyendas['data']
-                ?->RespuestaListaParametricasLeyendas
-                ?->listaLeyendas
-                ?? [];
+class FacturaDTO implements Exportable, JsonSerializable
+{
+    public function __construct(
+        public int $id,
+        public string $codigo,
+        public ClienteDTO $cliente,
+        public float $monto,
+        public EstadoFactura $estado,
+        public DateTimeImmutable $fecha,
+        public ?string $observacion = null,
+        public array $metadata = [],
+    ) {}
 
-            if (!empty($lista)) {
-                return $lista[array_rand($lista)];
+    public function estaPagada(): bool
+    {
+        return $this->estado === EstadoFactura::PAGADA;
+    }
+
+    public function toArray(): array
+    {
+        return [
+            'id'          => $this->id,
+            'codigo'      => $this->codigo,
+            'cliente'     => $this->cliente->jsonSerialize(),
+            'monto'       => $this->monto,
+            'estado'      => $this->estado->value,
+            'fecha'       => $this->fecha->format('Y-m-d H:i:s'),
+            'observacion' => $this->observacion,
+            'metadata'    => $this->metadata,
+        ];
+    }
+
+    public function jsonSerialize(): array
+    {
+        return $this->toArray();
+    }
+}
+
+class FacturaRepository implements RepositoryInterface
+{
+    /**
+     * @var list<FacturaDTO>
+     */
+    private array $facturas = [];
+
+    public function __construct()
+    {
+        $this->facturas = [
+            new FacturaDTO(
+                id: 1,
+                codigo: 'FAC-0001',
+                cliente: new ClienteDTO(
+                    id: 10,
+                    nombre: 'Juan Pérez',
+                    documento: '1234567',
+                    email: 'juan@example.com',
+                ),
+                monto: 1500.75,
+                estado: EstadoFactura::PAGADA,
+                fecha: new DateTimeImmutable('2026-05-29 10:30:00'),
+                observacion: 'Factura pagada correctamente.',
+                metadata: [
+                    'origen' => 'web',
+                    'tags' => ['siat', 'educativo', 'demo'],
+                    'debug' => true,
+                ],
+            ),
+            new FacturaDTO(
+                id: 2,
+                codigo: 'FAC-0002',
+                cliente: new ClienteDTO(
+                    id: 11,
+                    nombre: 'Empresa Demo SRL',
+                    documento: '987654321',
+                ),
+                monto: 299.99,
+                estado: EstadoFactura::EMITIDA,
+                fecha: new DateTimeImmutable(),
+                metadata: [
+                    'origen' => 'api',
+                    'moneda' => 'BOB',
+                ],
+            ),
+        ];
+    }
+
+    public function find(int|string $id): ?FacturaDTO
+    {
+        foreach ($this->facturas as $factura) {
+            if ((string) $factura->id === (string) $id) {
+                return $factura;
             }
-        } catch (\Throwable $e) {
-            Log::error('Error al obtener leyendas del SIAT', ['error' => $e->getMessage()]);
         }
 
         return null;
     }
 
-    /**
-     * Construye la URL QR de verificación en el portal del SIAT.
-     */
-    private function buildQrUrl(string $cuf, int $nroFactura, array $facturaResponse): string
+    public function all(): array
     {
-        $codigoRecepcion = $facturaResponse['data']
-            ->RespuestaServicioFacturacion
-            ->codigoRecepcion ?? null;
+        return $this->facturas;
+    }
+}
 
-        if (!$codigoRecepcion) {
-            return '';
+#[Route(method: 'GET', path: '/facturas', name: 'facturas.index')]
+class FacturaController
+{
+    use HasLogger;
+
+    public function __construct(
+        private readonly RepositoryInterface $repository,
+    ) {}
+
+    #[Route(method: 'GET', path: '/facturas/{id}', name: 'facturas.show')]
+    public function show(int|string $id): array
+    {
+        $this->log('Buscando factura', [
+            'id' => $id,
+        ]);
+
+        $factura = $this->repository->find($id);
+
+        if ($factura === null) {
+            throw new RuntimeException("Factura {$id} no encontrada.");
         }
 
-        $baseUrl = $this->siat->config->codigoAmbiente === 2
-            ? 'https://pilotosiat.impuestos.gob.bo'
-            : 'https://siat.impuestos.gob.bo';
-
-        return "{$baseUrl}/consulta/QR?nit={$this->siat->config->nit}&cuf={$cuf}&numero={$nroFactura}";
+        return [
+            'success' => true,
+            'data' => $factura->toArray(),
+        ];
     }
+
+    public function index(?string $estado = null): array
+    {
+        $facturas = new Collection($this->repository->all());
+
+        $filtradas = $facturas->filter(
+            fn (FacturaDTO $factura): bool =>
+                $estado === null || $factura->estado->value === $estado
+        );
+
+        return [
+            'success' => true,
+            'count' => count($filtradas->all()),
+            'data' => array_map(
+                callback: fn (FacturaDTO $factura): array => $factura->toArray(),
+                array: $filtradas->all(),
+            ),
+        ];
+    }
+}
+
+final class StringTester
+{
+    public const REGEX_EMAIL = '/^[\w\.-]+@[\w\.-]+\.\w{2,}$/i';
+
+    public static function demo(): void
+    {
+        $simple = 'String simple con $variable sin interpolar';
+        $double = "String doble con fecha: " . date('Y-m-d H:i:s');
+
+        $multiline = <<<HTML
+        <section class="card">
+            <h1>Factura Demo</h1>
+            <p>Total: Bs 1500.75</p>
+        </section>
+        HTML;
+
+        $raw = <<<'SQL'
+        SELECT *
+        FROM facturas
+        WHERE estado = 'pagada'
+          AND monto_total >= 1000
+        ORDER BY fecha_emision DESC;
+        SQL;
+
+        $json = <<<JSON
+        {
+            "success": true,
+            "message": "Tema VSCode probado correctamente",
+            "items": [1, 2, 3]
+        }
+        JSON;
+
+        echo $simple;
+        echo $double;
+        echo $multiline;
+        echo $raw;
+        echo $json;
+
+        preg_match(self::REGEX_EMAIL, 'demo@example.com', $matches);
+    }
+}
+
+function calcularImpuesto(
+    float $monto,
+    float $porcentaje = 13.0,
+    bool $redondear = true,
+): float {
+    $resultado = $monto * ($porcentaje / 100);
+
+    return $redondear
+        ? round($resultado, 2)
+        : $resultado;
+}
+
+function validarDocumento(string $documento): bool
+{
+    return match (true) {
+        preg_match('/^\d{5,12}$/', $documento) === 1 => true,
+        preg_match('/^[A-Z]{2}-\d{4}$/', $documento) === 1 => true,
+        default => false,
+    };
+}
+
+try {
+    $repository = new FacturaRepository();
+
+    $controller = new FacturaController(
+        repository: $repository,
+    );
+
+    $response = $controller->index(
+        estado: EstadoFactura::PAGADA->value,
+    );
+
+    echo json_encode(
+        value: $response,
+        flags: JSON_PRETTY_PRINT | JSON_UNESCAPED_UNICODE | JSON_THROW_ON_ERROR,
+    );
+
+    $factura = $controller->show(id: 1);
+
+    $monto = $factura['data']['monto'] ?? 0;
+    $iva = calcularImpuesto((float) $monto);
+
+    echo PHP_EOL . "IVA calculado: {$iva}" . PHP_EOL;
+
+    StringTester::demo();
+} catch (InvalidArgumentException $e) {
+    echo 'Argumento inválido: ' . $e->getMessage();
+} catch (RuntimeException | Exception $e) {
+    echo 'Error controlado: ' . $e->getMessage();
+} catch (Throwable $e) {
+    echo 'Error inesperado: ' . $e->getMessage();
+} finally {
+    echo PHP_EOL . 'Fin del test de sintaxis PHP.' . PHP_EOL;
 }
