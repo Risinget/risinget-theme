@@ -3,8 +3,9 @@
   "displayName": "risinget-theme",
   "description": "Risinget Theme",
   "version": "0.0.1",
+  "icon": "icon.jpg",
   "engines": {
-    "vscode": "^1.120.0"
+    "vscode": "^1.107.0"
   },
   "categories": [
     "Themes"
