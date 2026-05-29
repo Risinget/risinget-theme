@@ -16,19 +16,19 @@ Here are a few screenshots of the Risinget Theme in action:
 
 ### Image 1
 
-![PHP/Laravel code screenshot](images/Code_1.png)
+![PHP/Laravel code screenshot 0](https://raw.githubusercontent.com/Risinget/risinget-theme/refs/heads/master/images/Code_1.png)
 
 ### Image 2
 
-![JavaScript code screenshot](images/Code_2.png)
+![code screenshot 1](https://raw.githubusercontent.com/Risinget/risinget-theme/refs/heads/master/images/Code_2.png)
 
 ### Image 3
 
-![HTML code screenshot](images/Code_3.png)
+![code screenshot 2](https://raw.githubusercontent.com/Risinget/risinget-theme/refs/heads/master/images/Code_3.png)
 
 ### Image 4
 
-![CSS code screenshot](images/Code_4.png)
+![code screenshot 3](https://raw.githubusercontent.com/Risinget/risinget-theme/refs/heads/master/images/Code_4.png)
 
 ## Installation
 
