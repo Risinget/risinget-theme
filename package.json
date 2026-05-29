@@ -1,7 +1,8 @@
 {
   "name": "risinget-theme",
-  "displayName": "risinget-theme",
-  "description": "Risinget Theme",
+  "displayName": "Risinget Theme",
+  "publisher": "Risinget",
+  "description": "Theme based on documentation from laravel.com",
   "version": "0.0.1",
   "icon": "icon.jpg",
   "engines": {
@@ -10,6 +11,10 @@
   "categories": [
     "Themes"
   ],
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/Risinget/risinget-theme.git"
+  },
   "contributes": {
     "themes": [
       {
