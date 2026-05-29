@@ -4,6 +4,7 @@
   "publisher": "Risinget",
   "description": "Theme based on documentation from laravel.com",
   "version": "0.0.1",
+  "license": "MIT",
   "icon": "icon.jpg",
   "engines": {
     "vscode": "^1.107.0"
